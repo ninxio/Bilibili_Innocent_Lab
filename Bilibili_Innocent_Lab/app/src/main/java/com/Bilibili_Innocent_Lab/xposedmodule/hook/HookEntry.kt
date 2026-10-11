@@ -122,6 +122,8 @@ import com.Bilibili_Innocent_Lab.xposedmodule.hook.feature.BrandSplashCustomFeat
 import com.Bilibili_Innocent_Lab.xposedmodule.hook.feature.SystemMediaNotificationFeatureInstaller
 import com.Bilibili_Innocent_Lab.xposedmodule.hook.feature.PlayerQualityFeatureInstaller
 import com.Bilibili_Innocent_Lab.xposedmodule.hook.feature.PlayerCodecForceFeatureInstaller
+import com.Bilibili_Innocent_Lab.xposedmodule.hook.feature.ThreadRipperConfig
+import com.Bilibili_Innocent_Lab.xposedmodule.hook.feature.ThreadRipperFeatureInstaller
 import com.Bilibili_Innocent_Lab.xposedmodule.hook.feature.PlayerCapabilityFeatureInstaller
 import com.Bilibili_Innocent_Lab.xposedmodule.hook.feature.PlayerCapabilityOptions
 import com.Bilibili_Innocent_Lab.xposedmodule.hook.feature.PlayerSpeedFeatureInstaller
@@ -3417,6 +3419,30 @@ class HookEntry : XposedModule() {
                         decodeModeValue = prefs.getInt(
                             FeaturePreferences.PLAYER_DECODE_MODE,
                             0
+                        )
+                    )
+                )
+            )
+
+            featureInstallCoordinator.installAll(
+                listOf(
+                    ThreadRipperFeatureInstaller(
+                        enabled = prefs.getBoolean(FeaturePreferences.THREAD_RIPPER_ENABLED, false),
+                        multithread = prefs.getBoolean(
+                            FeaturePreferences.THREAD_RIPPER_MULTITHREAD,
+                            ThreadRipperConfig.DEFAULT_MULTITHREAD
+                        ),
+                        settings = ThreadRipperConfig.settings(
+                            mode = prefs.getString(
+                                FeaturePreferences.THREAD_RIPPER_CDN_MODE,
+                                ThreadRipperConfig.DEFAULT_MODE.key
+                            ),
+                            customHosts = prefs.getString(FeaturePreferences.THREAD_RIPPER_CUSTOM_HOSTS, ""),
+                            concurrency = prefs.getInt(
+                                FeaturePreferences.THREAD_RIPPER_CONCURRENCY,
+                                ThreadRipperConfig.DEFAULT_CONCURRENCY
+                            ),
+                            autoConcurrency = prefs.getBoolean(FeaturePreferences.THREAD_RIPPER_AUTO_CONCURRENCY, false)
                         )
                     )
                 )

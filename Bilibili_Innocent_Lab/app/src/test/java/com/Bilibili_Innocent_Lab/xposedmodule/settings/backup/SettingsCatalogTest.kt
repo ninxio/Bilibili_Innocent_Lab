@@ -209,11 +209,11 @@ class SettingsCatalogTest {
     }
 
     @Test
-    fun `catalog is a unique allowlist with 227 settings`() {
-        assertEquals(227, SettingsCatalog.specs.size)
-        assertEquals(227, SettingsCatalog.specs.map { it.id }.distinct().size)
-        assertEquals(227, SettingsCatalog.specs.map { it.storageKey }.distinct().size)
-        assertEquals(222, SettingsCatalog.specs.count { it.restorePolicy == RestorePolicy.AUTOMATIC })
+    fun `catalog is a unique allowlist with 233 settings`() {
+        assertEquals(233, SettingsCatalog.specs.size)
+        assertEquals(233, SettingsCatalog.specs.map { it.id }.distinct().size)
+        assertEquals(233, SettingsCatalog.specs.map { it.storageKey }.distinct().size)
+        assertEquals(228, SettingsCatalog.specs.count { it.restorePolicy == RestorePolicy.AUTOMATIC })
         assertEquals(5, SettingsCatalog.specs.count { it.restorePolicy == RestorePolicy.MANUAL })
         assertTrue(SettingsCatalog.specs.all { it.accepts(it.defaultValue) })
         assertTrue(SettingsCatalog.specs.all { it.id.matches(Regex("[a-z0-9][a-z0-9._-]{0,127}")) })
@@ -444,7 +444,7 @@ class SettingsCatalogTest {
         val expected = requireNotNull(javaClass.classLoader?.getResourceAsStream("settings-backup/catalog-v13.txt"))
             .bufferedReader().useLines { it.filter(String::isNotBlank).toList() }
         assertEquals(expected, SettingsCatalog.specs.filter { it.introducedCatalogVersion <= 13 }.map { it.id }.sorted())
-        assertEquals(50, SettingsCatalog.CATALOG_VERSION)
+        assertEquals(51, SettingsCatalog.CATALOG_VERSION)
         val added = SettingsCatalog.specs.filter { it.introducedCatalogVersion == 13 }
         assertEquals(6, added.size)
         assertTrue(added.all { it.restorePolicy == RestorePolicy.AUTOMATIC && ImportEffect.RESTART_BILIBILI in it.effects })
@@ -743,9 +743,9 @@ class SettingsCatalogTest {
 
     @Test
     fun `catalog types and manual roaming boundary are explicit`() {
-        assertEquals(139, SettingsCatalog.specs.count { it.type == SettingValueType.BOOLEAN })
-        assertEquals(19, SettingsCatalog.specs.count { it.type == SettingValueType.INTEGER })
-        assertEquals(69, SettingsCatalog.specs.count { it.type == SettingValueType.STRING })
+        assertEquals(142, SettingsCatalog.specs.count { it.type == SettingValueType.BOOLEAN })
+        assertEquals(20, SettingsCatalog.specs.count { it.type == SettingValueType.INTEGER })
+        assertEquals(71, SettingsCatalog.specs.count { it.type == SettingValueType.STRING })
 
         val roaming = requireNotNull(SettingsCatalog.byId["compat.roaming.enabled"])
         assertEquals(RestorePolicy.MANUAL, roaming.restorePolicy)
@@ -962,6 +962,24 @@ class SettingsCatalogTest {
             assertTrue(it.accepts(SettingValue.IntValue(40)))
             assertFalse(it.accepts(SettingValue.IntValue(41)))
         }
+    }
+
+    @Test
+    fun `catalog v51 adds the thread ripper settings, off by default and bounded`() {
+        val added = SettingsCatalog.specs.filter { it.introducedCatalogVersion == 51 }
+        assertEquals(setOf(FeaturePreferences.THREAD_RIPPER_ENABLED, FeaturePreferences.THREAD_RIPPER_MULTITHREAD,
+            FeaturePreferences.THREAD_RIPPER_CDN_MODE, FeaturePreferences.THREAD_RIPPER_CUSTOM_HOSTS,
+            FeaturePreferences.THREAD_RIPPER_CONCURRENCY, FeaturePreferences.THREAD_RIPPER_AUTO_CONCURRENCY),
+            added.map { it.storageKey }.toSet())
+        assertTrue(added.all { it.restorePolicy == RestorePolicy.AUTOMATIC && ImportEffect.RESTART_BILIBILI in it.effects })
+        val byKey = added.associateBy { it.storageKey }
+        assertEquals(SettingValue.Bool(false), byKey.getValue(FeaturePreferences.THREAD_RIPPER_ENABLED).defaultValue)
+        assertEquals(SettingValue.Text("mainland"), byKey.getValue(FeaturePreferences.THREAD_RIPPER_CDN_MODE).defaultValue)
+        assertFalse(byKey.getValue(FeaturePreferences.THREAD_RIPPER_CDN_MODE).accepts(SettingValue.Text("anywhere")))
+        val threads = byKey.getValue(FeaturePreferences.THREAD_RIPPER_CONCURRENCY)
+        assertEquals(SettingValue.IntValue(8), threads.defaultValue)
+        assertTrue(threads.accepts(SettingValue.IntValue(64)))
+        assertFalse(threads.accepts(SettingValue.IntValue(128)))
     }
 
     @Test

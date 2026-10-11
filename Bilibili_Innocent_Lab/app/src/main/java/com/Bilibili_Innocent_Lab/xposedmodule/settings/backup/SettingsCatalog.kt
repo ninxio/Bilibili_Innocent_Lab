@@ -17,6 +17,7 @@ import com.Bilibili_Innocent_Lab.xposedmodule.hook.feature.SemanticCustomRule
 import com.Bilibili_Innocent_Lab.xposedmodule.hook.feature.SemanticGuidance
 import com.Bilibili_Innocent_Lab.xposedmodule.hook.feature.SemanticRoute
 import com.Bilibili_Innocent_Lab.xposedmodule.hook.feature.SemanticSurface
+import com.Bilibili_Innocent_Lab.xposedmodule.hook.feature.ThreadRipperConfig
 import com.Bilibili_Innocent_Lab.xposedmodule.settings.appearance.MaterialColorSpec
 import com.Bilibili_Innocent_Lab.xposedmodule.settings.appearance.MaterialColorSpecStore
 import com.Bilibili_Innocent_Lab.xposedmodule.settings.appearance.ModalBackdropBlurStore
@@ -32,7 +33,7 @@ import com.Bilibili_Innocent_Lab.xposedmodule.settings.appearance.HostGlassRende
 internal object SettingsCatalog {
     const val PRODUCT_ID = "bilibili-innocent-lab.settings"
     const val SCOPE_ID = "core-user-settings"
-    const val CATALOG_VERSION = 50
+    const val CATALOG_VERSION = 51
     const val ID_PLAYER_DEFAULT_SPEED = "player.default_speed.percent"
     const val ID_PLAYER_LONG_PRESS_SPEED = "player.long_press_speed.percent"
     const val ID_FREE_COPY_COMMENT = "free_copy.comment.enabled"
@@ -76,6 +77,12 @@ internal object SettingsCatalog {
     const val ID_DANMAKU_SEMANTIC_CUSTOM_RULES = "player.danmaku.semantic_filter.custom_rules"
     const val ID_COMMENT_SEMANTIC_CUSTOM_RULES = "comments.semantic_filter.custom_rules"
     const val ID_VIDEO_SEMANTIC_CUSTOM_RULES = "video.semantic_filter.custom_rules"
+    const val ID_THREAD_RIPPER_ENABLED = "player.thread_ripper.enabled"
+    const val ID_THREAD_RIPPER_MULTITHREAD = "player.thread_ripper.multithread"
+    const val ID_THREAD_RIPPER_CDN_MODE = "player.thread_ripper.cdn_mode"
+    const val ID_THREAD_RIPPER_CUSTOM_HOSTS = "player.thread_ripper.custom_hosts"
+    const val ID_THREAD_RIPPER_CONCURRENCY = "player.thread_ripper.concurrency"
+    const val ID_THREAD_RIPPER_AUTO_CONCURRENCY = "player.thread_ripper.auto_concurrency"
 
     /** 各过滤面的"判定来源 / 自定义类型"目录 id。 */
     fun semanticRouteId(surface: SemanticSurface): String = when (surface) {
@@ -744,6 +751,23 @@ internal object SettingsCatalog {
             default = 0,
             allowed = PlayerQualityConfig.supportedQns.toSet()
         ),
+        // v51：线程撕裂者（播放加速），移植自 MrTangLuyao/Bilibili-thread-ripper。
+        bool(ID_THREAD_RIPPER_ENABLED, FeaturePreferences.THREAD_RIPPER_ENABLED,
+            R.string.thread_ripper_enabled, introducedCatalogVersion = 51),
+        bool(ID_THREAD_RIPPER_MULTITHREAD, FeaturePreferences.THREAD_RIPPER_MULTITHREAD,
+            R.string.thread_ripper_multithread, default = ThreadRipperConfig.DEFAULT_MULTITHREAD,
+            introducedCatalogVersion = 51),
+        text(ID_THREAD_RIPPER_CDN_MODE, FeaturePreferences.THREAD_RIPPER_CDN_MODE, R.string.thread_ripper_cdn_mode,
+            default = ThreadRipperConfig.DEFAULT_MODE.key, allowed = ThreadRipperConfig.MODE_KEYS,
+            introducedCatalogVersion = 51),
+        text(ID_THREAD_RIPPER_CUSTOM_HOSTS, FeaturePreferences.THREAD_RIPPER_CUSTOM_HOSTS,
+            R.string.thread_ripper_custom_hosts, maxStringLength = ThreadRipperConfig.MAX_CUSTOM_HOSTS_LENGTH,
+            introducedCatalogVersion = 51),
+        integer(ID_THREAD_RIPPER_CONCURRENCY, FeaturePreferences.THREAD_RIPPER_CONCURRENCY,
+            R.string.thread_ripper_concurrency, default = ThreadRipperConfig.DEFAULT_CONCURRENCY,
+            allowed = ThreadRipperConfig.CONCURRENCY_CHOICES.toSet(), introducedCatalogVersion = 51),
+        bool(ID_THREAD_RIPPER_AUTO_CONCURRENCY, FeaturePreferences.THREAD_RIPPER_AUTO_CONCURRENCY,
+            R.string.thread_ripper_auto_concurrency, introducedCatalogVersion = 51),
         integer(
             "player.codec.preference",
             FeaturePreferences.PLAYER_CODEC_PREFERENCE,
@@ -964,7 +988,7 @@ internal object SettingsCatalog {
     val byStorageKey: Map<String, SettingSpec> = specs.associateBy(SettingSpec::storageKey)
 
     init {
-        check(specs.size == 227) { "Expected 227 catalog settings, found ${specs.size}" }
+        check(specs.size == 233) { "Expected 233 catalog settings, found ${specs.size}" }
         check(byId.size == specs.size) { "Duplicate logical setting id" }
         check(specs.map(SettingSpec::storageKey).distinct().size == specs.size) {
             "Duplicate settings storage key"

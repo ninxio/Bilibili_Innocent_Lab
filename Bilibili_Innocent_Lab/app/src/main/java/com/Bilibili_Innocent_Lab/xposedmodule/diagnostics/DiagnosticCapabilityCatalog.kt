@@ -20,8 +20,13 @@ internal object DiagnosticCapabilityCatalog {
      * 客户端是按 "比我已知的版本更新" 做增量的，
      * VERSION 涨了却没有任何条目标在新版本上，增量就是空集（有测试钉住）。
      */
-    const val VERSION = 21
+    const val VERSION = 22
     val definitions = listOf(
+        DiagnosticCapabilityDefinition("thread_ripper", "thread_ripper", R.string.thread_ripper_title,
+            setOf("player.thread_ripper.enabled", "player.thread_ripper.multithread", "player.thread_ripper.cdn_mode",
+                "player.thread_ripper.custom_hosts", "player.thread_ripper.concurrency",
+                "player.thread_ripper.auto_concurrency"),
+            introducedCatalogVersion = 22),
         DiagnosticCapabilityDefinition("host_background", "host_background", R.string.host_background_title,
             setOf("host.background.preset", "host.background.blur", "host.background.saturation", "host.background.veil", "host.background.asset"),
             introducedCatalogVersion = 21),

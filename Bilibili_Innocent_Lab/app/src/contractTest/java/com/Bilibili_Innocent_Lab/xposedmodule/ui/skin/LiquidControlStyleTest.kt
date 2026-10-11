@@ -85,7 +85,8 @@ class LiquidControlStyleTest {
         // 2026-10-08：宿主玻璃材质与高级渲染共用一个受检选择弹窗，40 → 41。
         // 2026-10-09：合入 Agent 任务与执行日志表单，复用同一皮肤容器与公共 presenter，41 → 43。
         // 2026-10-11：合入首页视频卡片间距弹窗，43 → 44。
-        assertEquals(44, dialogs)
+        // 2026-10-12：线程撕裂者的单选弹窗（CDN 节点 / 线程数共用）与自定义节点编辑弹窗，44 → 46。
+        assertEquals(46, dialogs)
         // 「管理常用」改用定宽 presentSizedModalDialog（EXACTLY 行宽保证把手钉右缘）。
         assertTrue(SettingsUiSource.function("showSettingsFavoritesDialog").contains("presentSizedModalDialog(dialog, container, width, anchor)"))
         val presenter = SettingsUiSource.function("presentSizedModalDialog")

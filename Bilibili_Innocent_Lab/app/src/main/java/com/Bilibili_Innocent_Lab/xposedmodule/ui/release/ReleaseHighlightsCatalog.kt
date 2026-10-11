@@ -280,6 +280,13 @@ internal object ReleaseHighlightsCatalog {
     )), ReleaseHighlightsBatch(14, listOf(
         ReleaseHighlight("home-card-spacing", HighlightKind.NEW, R.string.host_home_card_spacing_tip,
             HighlightDestination("host.home_cards.horizontal_dp", alsoCovers = setOf("host.home_cards.vertical_dp")))
+    )), ReleaseHighlightsBatch(15, listOf(
+        // 线程撕裂者：开关之外的五项都是同一功能的配套设置，入口在同一段播放加速设置里。
+        ReleaseHighlight("thread-ripper", HighlightKind.NEW, R.string.highlights_thread_ripper,
+            HighlightDestination(SettingsCatalog.ID_THREAD_RIPPER_ENABLED, alsoCovers = setOf(
+                SettingsCatalog.ID_THREAD_RIPPER_MULTITHREAD, SettingsCatalog.ID_THREAD_RIPPER_CDN_MODE,
+                SettingsCatalog.ID_THREAD_RIPPER_CUSTOM_HOSTS, SettingsCatalog.ID_THREAD_RIPPER_CONCURRENCY,
+                SettingsCatalog.ID_THREAD_RIPPER_AUTO_CONCURRENCY)))
     )))
     val currentRevision: Int get() = batches.maxOf { it.revision }
     val destinations get() = batches.sortedByDescending { it.revision }.flatMap { it.entries }

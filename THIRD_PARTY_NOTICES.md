@@ -78,6 +78,27 @@ Except for DexKit's `Core/` directory, the upstream project is licensed under
 the Apache License, Version 2.0. The native core is licensed under the GNU
 Lesser General Public License, Version 3.0. See the upstream repository for the
 corresponding complete license texts and source code.
+## Bilibili-thread-ripper
+
+The experimental playback accelerator (`ThreadRipper*` under
+`hook/feature/` and `hook/adapter/`) is a Kotlin port of the CDN selection, node
+ban list, piece scheduler, hedging and automatic thread-count logic of
+[MrTangLuyao/Bilibili-thread-ripper](https://github.com/MrTangLuyao/Bilibili-thread-ripper),
+based on upstream commit `0302b345cdfe367ac599b52dc6874e3f7967e220`
+(`src/range-core.js`, `src/cdn-resolver.js`, `src/idm-downloader.js`).
+
+Copyright (c) 2026 Bilibili-thread-ripper contributors
+
+Licensed under the MIT License. The complete license text is provided in
+`third_party/Bilibili-thread-ripper-LICENSE.txt`.
+
+The port replaces the browser's fetch/MediaSource pipeline with blocking
+`HttpURLConnection` transfers and a loopback-only (127.0.0.1) Range service for
+the host player, rewrites DASH addresses in the playback protobuf responses,
+uses the proxy writer's wait time instead of the browser playhead as the
+"falling behind" signal, and drops the web-only live-stream, settings-panel and
+MediaSource takeover code.
+
 ## Android 边界拉伸采样坐标
 
 - 来源：Android Open Source Project 的 `EdgeEffect.java` 与 `StretchEffect.cpp`。

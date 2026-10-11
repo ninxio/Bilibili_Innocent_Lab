@@ -118,6 +118,7 @@ import com.Bilibili_Innocent_Lab.xposedmodule.hook.feature.TidBlocklistCodec
 import com.Bilibili_Innocent_Lab.xposedmodule.hook.feature.PlayerQualityConfig
 import com.Bilibili_Innocent_Lab.xposedmodule.hook.feature.PlayerCodecPreference
 import com.Bilibili_Innocent_Lab.xposedmodule.hook.feature.PlayerDecodeMode
+import com.Bilibili_Innocent_Lab.xposedmodule.hook.feature.ThreadRipperConfig
 import com.Bilibili_Innocent_Lab.xposedmodule.hook.feature.PlayerSpeedConfig
 import com.Bilibili_Innocent_Lab.xposedmodule.runtime.AndroidUserSpace
 import com.Bilibili_Innocent_Lab.xposedmodule.runtime.AndroidUserSpaceSnapshot
@@ -400,6 +401,10 @@ class MainActivity : SkinnedActivity() {
     internal var playerDefaultQualityQn = 0
     internal var playerCodecPreference = PlayerCodecPreference.FOLLOW_HOST.value
     internal var playerDecodeMode = PlayerDecodeMode.FOLLOW_HOST.value
+    internal var threadRipperMode = ThreadRipperConfig.DEFAULT_MODE.key
+    internal var threadRipperConcurrency = ThreadRipperConfig.DEFAULT_CONCURRENCY
+    internal var threadRipperAutoConcurrency = false
+    internal var threadRipperCustomHosts = ""
     private var playerDisableLongPress = false
     internal var playerLongPressSpeedPercent = 0
     internal var playerDefaultSpeedPercent = 0
@@ -489,6 +494,9 @@ class MainActivity : SkinnedActivity() {
     internal var playerQualitySummaryView: NativeTextView? = null
     internal var playerCodecPreferenceSummaryView: NativeTextView? = null
     internal var playerDecodeModeSummaryView: NativeTextView? = null
+    internal var threadRipperModeSummaryView: NativeTextView? = null
+    internal var threadRipperConcurrencySummaryView: NativeTextView? = null
+    internal var threadRipperCustomHostsSummaryView: NativeTextView? = null
     private var playerLongPressSpeedSummary: NativeTextView? = null
     private var playerDefaultSpeedSummary: NativeTextView? = null
     private var homeTabRulesSummaryView: NativeTextView? = null
@@ -4204,6 +4212,9 @@ class MainActivity : SkinnedActivity() {
         playerQualitySummaryView = null
         playerCodecPreferenceSummaryView = null
         playerDecodeModeSummaryView = null
+        threadRipperModeSummaryView = null
+        threadRipperConcurrencySummaryView = null
+        threadRipperCustomHostsSummaryView = null
         playerLongPressSpeedSummary = null
         playerDefaultSpeedSummary = null
         homeTabRulesSummaryView = null
@@ -4414,6 +4425,7 @@ class MainActivity : SkinnedActivity() {
         playerDecodeMode = PlayerDecodeMode.fromValue(
             uiSettings.int(FeaturePreferences.PLAYER_DECODE_MODE)
         ).value
+        loadThreadRipperSettings(uiSettings)
         playerDisableLongPress = uiSettings.bool(FeaturePreferences.PLAYER_DISABLE_LONG_PRESS)
         playerLongPressSpeedPercent = PlayerSpeedConfig.normalize(
             uiSettings.int(FeaturePreferences.PLAYER_LONG_PRESS_SPEED_PERCENT)
@@ -10490,6 +10502,16 @@ class MainActivity : SkinnedActivity() {
                 textSize = 12f
             }
         }
+        TextView(
+            lparams = LayoutParams(widthMatchParent = true) {
+                topMargin = AdvancedSubsectionStyle.TOP_MARGIN_DP.dp
+                bottomMargin = AdvancedSubsectionStyle.BOTTOM_MARGIN_DP.dp
+            }
+        ) {
+            text = stringResource(R.string.thread_ripper_title)
+            applyAdvancedSubsectionStyle()
+        }
+        threadRipperRows(this, uiSettings)
         TextView(
             lparams = LayoutParams(widthMatchParent = true) {
                 topMargin = AdvancedSubsectionStyle.TOP_MARGIN_DP.dp

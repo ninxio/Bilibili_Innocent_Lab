@@ -997,6 +997,7 @@ class DiagnosticsActivity : SkinnedActivity(),
             "player_default_quality" -> R.string.diagnostics_host_feature_quality
             "player_capabilities" -> R.string.player_capabilities_title
             "player_speed" -> R.string.player_speed_title
+            "thread_ripper" -> R.string.thread_ripper_title
             "sponsorblock" -> R.string.sponsorblock_title
             "splash_ad_purify" -> R.string.diagnostics_host_feature_splash
             "mine_component_filter" -> R.string.diagnostics_host_feature_mine

@@ -222,6 +222,7 @@ Bilibili Innocent Lab 是一个面向 Android 哔哩哔哩客户端的 Xposed/LS
 | 屏蔽影视页自动活动半屏 | 屏蔽电影、电视剧和番剧播放页在播放器下方自动展开的大会员促销等活动半屏；保留主动活动链接、购买入口与正常播放权限判断。默认关闭，重启哔哩哔哩后生效 |
 | 播放器状态栏透明 | 仅在普通视频详情页使用透明状态栏样式，不全局修改其他 Activity 或窗口 |
 | 默认播放画质 | 跟随哔哩哔哩，或优先请求 360P / 480P / 720P / 720P60 / 1080P / 1080P 高码率 / 1080P60 / 4K / 8K；仅调整视频开始播放时的初始画质请求，不解锁大会员或付费画质，片源、账号、网络或服务器不支持时客户端仍会自动调整 |
+| 播放加速（线程撕裂者，实验性） | 移植自 [Bilibili 线程撕裂者](https://github.com/MrTangLuyao/Bilibili-thread-ripper)（MIT）。把在线播放的 DASH 地址换到大陆 / 海外 / 自定义 CDN 节点；开启"多线程下载"后，由仅监听 127.0.0.1 的本地服务把每段请求切块、分给多条连接和多个节点并发下载，逐块核对 Range 后按顺序交给播放器，并沿用原项目的节点封禁、测速加权、慢块救援与自动线程数（8–64）。不改付费权限、清晰度限制与签名，离线缓存保持原样；本地服务起不来或首块失败时自动退回 CDN 节点与原始地址。默认关闭，重启哔哩哔哩后生效 |
 
 #### 弹幕净化
 
@@ -798,6 +799,7 @@ SPDX-License-Identifier: GPL-3.0-only
 - [KavaRef](https://github.com/HighCapable/KavaRef)
 - [Lumen Coacervation Engine](https://github.com/jichuo1/LumenCoacervationEngine)（视频卡片柔光材质，Apache-2.0）
 - [BBZQ](https://github.com/HSSkyBoy/BBZQ)
+- [Bilibili-thread-ripper](https://github.com/MrTangLuyao/Bilibili-thread-ripper)（播放加速的 CDN 选择与多线程调度，MIT）
 - Xposed / LSPosed 社区
 - Android 开源项目与相关开发文档
 - 参与测试、反馈兼容问题和提供日志的用户

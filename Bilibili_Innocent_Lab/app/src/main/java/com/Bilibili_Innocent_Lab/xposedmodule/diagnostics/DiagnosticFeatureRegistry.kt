@@ -102,6 +102,8 @@ internal object DiagnosticFeatureRegistry {
             runtimeEvidenceExpected = true),
         DiagnosticFeatureDescriptor("player_speed", DiagnosticFeatureCategory.PLAYER_AND_DETAIL,
             runtimeEvidenceExpected = true),
+        DiagnosticFeatureDescriptor("thread_ripper", DiagnosticFeatureCategory.PLAYER_AND_DETAIL,
+            runtimeEvidenceExpected = true),
         DiagnosticFeatureDescriptor("sponsorblock", DiagnosticFeatureCategory.PLAYER_AND_DETAIL,
             runtimeEvidenceExpected = true),
         DiagnosticFeatureDescriptor(

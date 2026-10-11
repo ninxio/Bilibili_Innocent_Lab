@@ -200,6 +200,17 @@ internal object FeaturePreferences {
     const val PLAYER_DEFAULT_QUALITY_QN = "player_default_quality_qn"
     const val PLAYER_CODEC_PREFERENCE = "player_codec_preference"
     const val PLAYER_DECODE_MODE = "player_decode_mode"
+
+    /**
+     * 线程撕裂者（播放加速）。自定义节点是逗号/换行分隔的一条 Text，解析见 [ThreadRipperConfig]；
+     * 线程数与"自动"分开存，切回手动时保留上次选的档位。
+     */
+    const val THREAD_RIPPER_ENABLED = "thread_ripper_enabled"
+    const val THREAD_RIPPER_MULTITHREAD = "thread_ripper_multithread"
+    const val THREAD_RIPPER_CDN_MODE = "thread_ripper_cdn_mode"
+    const val THREAD_RIPPER_CUSTOM_HOSTS = "thread_ripper_custom_hosts"
+    const val THREAD_RIPPER_CONCURRENCY = "thread_ripper_concurrency"
+    const val THREAD_RIPPER_AUTO_CONCURRENCY = "thread_ripper_auto_concurrency"
     const val BLOCK_COMPONENT_LIBRARY_DOWNLOAD = "block_component_library_download"
     const val PLAYER_UNLOCK_BACKGROUND = "player_unlock_background"
     const val PLAYER_UNLOCK_SMALL_WINDOW = "player_unlock_small_window"

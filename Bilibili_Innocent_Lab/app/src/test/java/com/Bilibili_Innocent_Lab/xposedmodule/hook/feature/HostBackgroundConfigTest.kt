@@ -15,7 +15,7 @@ class HostBackgroundConfigTest {
         assertEquals(setOf("host.background.preset", "host.background.blur", "host.background.saturation",
             "host.background.veil", "host.background.asset"), background.map { it.id }.toSet())
         assertTrue(background.all { it.introducedCatalogVersion == 49 })
-        val capabilities = DiagnosticCapabilityCatalog.definitions.filter { it.introducedCatalogVersion > 20 }
+        val capabilities = DiagnosticCapabilityCatalog.definitions.filter { it.introducedCatalogVersion == 21 }
         assertEquals(listOf("host_background"), capabilities.map { it.id })
         assertTrue(capabilities.all { it.introducedCatalogVersion == 21 })
     }
