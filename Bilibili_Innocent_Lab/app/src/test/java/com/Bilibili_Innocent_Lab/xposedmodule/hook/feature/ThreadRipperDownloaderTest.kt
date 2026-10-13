@@ -243,6 +243,116 @@ class ThreadRipperDownloaderTest {
         }
     }
 
+    @Test(timeout = 60_000)
+    fun `sequential 1 MiB player requests are served from the prefetch cache instead of re-probing each range`() {
+        // 真机上宿主播放器按 1 MiB 闭区间顺序请求；每段都重新探测曾让每 MiB 产生 15 个上游请求。
+        val total = 12 * MB
+        val upstream = FakeUpstream(total)
+        val lines = java.util.Collections.synchronizedList(ArrayList<String>())
+        val proxy = ThreadRipperProxyServer(downloader(upstream, ThreadRipperSettings(concurrency = 16)), stats = { lines += it })
+        proxy.start()
+        try {
+            val local = proxy.register(ThreadRipperStreamSource(mediaUrl("upos-sz-mirrorcosov.bilivideo.com"), emptyList(), false, ThreadRipperBanList()) { ThreadRipperSettings(concurrency = 16) })
+            for (index in 0 until 8) {
+                val from = index * MB
+                val (head, body) = request(local, "GET", "bytes=$from-${from + MB - 1}")
+                assertTrue(head, head.contains("Content-Range: bytes $from-${from + MB - 1}/$total"))
+                assertArrayEquals(ByteArray(MB.toInt()) { byteAt(from + it) }, body)
+                Thread.sleep(50)
+            }
+            val requests = upstream.requests.values.sumOf { it.get() }
+            assertTrue("upstream requests for 8 MiB: $requests", requests < 45)
+            val cached = lines.filter { it.startsWith("[BTR] video") }.drop(1)
+                .map { Regex("""cached=(\d+)/(\d+)""").find(it)!!.groupValues.let { g -> g[1].toInt() to g[2].toInt() } }
+            assertTrue("later requests come from the cache: $cached", cached.sumOf { it.first } * 2 >= cached.sumOf { it.second })
+        } finally {
+            proxy.stop()
+        }
+    }
+
+    @Test(timeout = 60_000)
+    fun `two players reading far apart in the same stream do not evict each other`() {
+        // 真机上宿主播放器会对同一路流同时请求相距很远的两段；单游标时互相驱逐，读到被取消的块就报错。
+        val total = 64 * MB
+        val proxy = ThreadRipperProxyServer(downloader(FakeUpstream(total), ThreadRipperSettings(concurrency = 16)))
+        proxy.start()
+        try {
+            val local = proxy.register(ThreadRipperStreamSource(mediaUrl("upos-sz-mirrorcosov.bilivideo.com"), emptyList(), false, ThreadRipperBanList()) { ThreadRipperSettings(concurrency = 16) })
+            val far = 40 * MB
+            val results = listOf(0L, far).map { from ->
+                java.util.concurrent.CompletableFuture.supplyAsync { from to request(local, "GET", "bytes=$from-${from + 4 * MB - 1}") }
+            }.map { it.get(50, TimeUnit.SECONDS) }
+            for ((from, response) in results) {
+                assertTrue(response.first, response.first.startsWith("HTTP/1.1 206"))
+                assertArrayEquals(ByteArray((4 * MB).toInt()) { byteAt(from + it) }, response.second)
+            }
+        } finally {
+            proxy.stop()
+        }
+    }
+
+    @Test(timeout = 60_000)
+    fun `a declared DASH size lets the proxy answer headers before the slow first byte arrives`() {
+        // 宿主播放器读响应头约 3.5 秒超时；新流先探测再回头曾让它放弃代理。
+        val total = 4 * MB
+        val fake = FakeUpstream(total)
+        val slow = object : ThreadRipperFetcher {
+            override fun newCall(url: String, start: Long, end: Long, headers: Map<String, String>, settings: ThreadRipperSettings): ThreadRipperFetcher.Call {
+                val inner = fake.newCall(url, start, end, headers, settings)
+                return object : ThreadRipperFetcher.Call {
+                    override fun execute(): ThreadRipperFetcher.Response {
+                        Thread.sleep(1500)
+                        return inner.execute()
+                    }
+                    override fun cancel() = inner.cancel()
+                }
+            }
+        }
+        val proxy = ThreadRipperProxyServer(downloader(slow))
+        proxy.start()
+        try {
+            val local = proxy.register(ThreadRipperStreamSource(mediaUrl("upos-sz-mirrorcosov.bilivideo.com"), emptyList(), false, ThreadRipperBanList(), declaredSize = total) { ThreadRipperSettings() })
+            val uri = URI(local)
+            Socket(uri.host, uri.port).use { socket ->
+                socket.soTimeout = 30_000
+                val started = System.nanoTime()
+                socket.getOutputStream().write("GET ${uri.rawPath} HTTP/1.1\r\nRange: bytes=1048576-2097151\r\n\r\n".toByteArray())
+                val input = socket.getInputStream()
+                val head = StringBuilder()
+                while (!head.endsWith("\r\n\r\n")) head.append(input.read().toChar())
+                val headerMs = (System.nanoTime() - started) / 1_000_000
+                assertTrue("headers after $headerMs ms", headerMs < 800)
+                assertTrue(head.toString(), head.contains("Content-Range: bytes 1048576-2097151/$total"))
+                assertArrayEquals(ByteArray(MB.toInt()) { byteAt(MB + it) }, input.readBytes())
+            }
+        } finally {
+            proxy.stop()
+        }
+    }
+
+    @Test fun `a completed transfer releases its connection for keep-alive instead of disconnecting`() {
+        val released = AtomicInteger()
+        val closed = AtomicInteger()
+        val fetcher = object : ThreadRipperFetcher {
+            override fun newCall(url: String, start: Long, end: Long, headers: Map<String, String>, settings: ThreadRipperSettings) =
+                object : ThreadRipperFetcher.Call {
+                    override fun execute() = object : ThreadRipperFetcher.Response {
+                        override val status = 206
+                        override val contentRange = "bytes $start-$end/${MB}"
+                        override val body: InputStream = ByteArrayInputStream(ByteArray((end - start + 1).toInt()))
+                        override fun release() { released.incrementAndGet() }
+                        override fun close() { closed.incrementAndGet() }
+                    }
+                    override fun cancel() { closed.incrementAndGet() }
+                }
+        }
+        val only = mediaUrl("upos-sz-mirrorali.bilivideo.com")
+        val resolver = ThreadRipperCdnResolver(only, emptyList(), { Mode.CUSTOM }, null, { listOf("upos-sz-mirrorali.bilivideo.com") })
+        ThreadRipperDownloader(fetcher, { ThreadRipperSettings() }).downloadPiece(ThreadRipperPiece(0, 0, 65535), resolver, ThreadRipperCancel(), emptyMap(), listOf(only))
+        assertEquals(1, released.get())
+        assertEquals(0, closed.get())
+    }
+
     @Test fun `the proxy answers 502 when no node delivers, so the player falls back to its backup address`() {
         val upstream = FakeUpstream(MB) { _, _, _ -> FakeUpstream.Reply.Status(503) }
         val proxy = ThreadRipperProxyServer(downloader(upstream))

@@ -27,7 +27,7 @@ class ThreadRipperPlayUrlAccessTest {
     )
 
     private fun reply(): PlayViewUniteReply = PlayViewUniteReply(VodInfo(
-        streams = listOf(Stream(DashVideo(mediaUrl(cosov, 30080), listOf(mediaUrl(ali, 30080)))), Stream(null, 16)),
+        streams = listOf(Stream(DashVideo(mediaUrl(cosov, 30080), listOf(mediaUrl(ali, 30080)), size = 4321)), Stream(null, 16)),
         audios = listOf(DashItem(mediaUrl(cosov, 30280), emptyList(), 30280)),
         dolby = DolbyItem(listOf(DashItem(mediaUrl(cosov, 30250), emptyList(), 30250))),
         lossless = LossLessItem(DashItem(mediaUrl(cosov, 30251), emptyList(), 30251)),
@@ -38,12 +38,15 @@ class ThreadRipperPlayUrlAccessTest {
         val original = reply.getVodInfo()
         val originalDash = original.getStreamList(0).getDashVideo()
         val seen = ArrayList<Pair<String, Boolean>>()
-        val changed = access().apply(reply) { primary, backups, audio ->
+        val sizes = ArrayList<Long>()
+        val changed = access().apply(reply) { primary, backups, audio, size ->
             seen += primary to audio
+            sizes += size
             "LOCAL-$primary" to listOf(primary) + backups
         }
         assertEquals("video + audio + dolby + lossless", 4, changed)
         assertEquals(listOf(false, true, true, true), seen.map { it.second })
+        assertEquals("the declared DASH size reaches the rewriter", listOf(4321L, 0L, 0L, 0L), sizes)
         val info = reply.getVodInfo()
         assertNotSame(original, info)
         val dash = info.getStreamList(0).getDashVideo()
@@ -61,12 +64,12 @@ class ThreadRipperPlayUrlAccessTest {
 
     @Test fun `default and video-less replies, and a rewriter that changes nothing, leave the reply as it is`() {
         val access = access()
-        val rewrite = ThreadRipperPlayUrlAccess.Rewriter { primary, backups, _ -> "x$primary" to backups }
+        val rewrite = ThreadRipperPlayUrlAccess.Rewriter { primary, backups, _, _ -> "x$primary" to backups }
         assertEquals(0, access.apply(PlayViewUniteReply.getDefaultInstance(), rewrite))
         assertEquals(0, access.apply(PlayViewUniteReply(), rewrite))
         val reply = reply()
         val before = reply.getVodInfo()
-        assertEquals(0, access.apply(reply) { _, _, _ -> null })
+        assertEquals(0, access.apply(reply) { _, _, _, _ -> null })
         assertSame(before, reply.getVodInfo())
         assertEquals(0, access.apply(Any(), rewrite))
     }

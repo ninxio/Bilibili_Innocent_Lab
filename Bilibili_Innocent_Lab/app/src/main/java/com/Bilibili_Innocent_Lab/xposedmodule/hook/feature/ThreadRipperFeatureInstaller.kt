@@ -15,8 +15,10 @@ internal class ThreadRipperFeatureInstaller(
     private val enabled: Boolean,
     private val multithread: Boolean,
     private val settings: ThreadRipperSettings,
+    /** 统计日志输出；null 表示关闭。由 HookEntry 按模块日志设置决定。 */
+    private val stats: ((String) -> Unit)? = null,
     private val runtimeFactory: (log: (String) -> Unit) -> ThreadRipperRuntime = { log ->
-        ThreadRipperRuntime(settings, multithread, log)
+        ThreadRipperRuntime(settings, multithread, log, stats)
     },
 ) : FeatureInstaller {
     override val id = ID
@@ -44,9 +46,13 @@ internal class ThreadRipperFeatureInstaller(
             val download = DownloadFlag.resolve(request, family.downloadPath)
             fun apply(requestValue: Any?, reply: Any) {
                 if (!access.replyClass.isInstance(reply)) return
-                if (requestValue != null && download?.isDownload(requestValue) == true) return
+                if (requestValue != null && download?.isDownload(requestValue) == true) {
+                    stats?.invoke("[BTR] reply ${family.id} skipped=download")
+                    return
+                }
                 environment.reportRuntimeEvidence(ID, FeatureRuntimeStage.OBSERVED)
                 runCatching { access.apply(reply, runtime.rewriterForReply()) }.onSuccess { changed ->
+                    stats?.invoke("[BTR] reply ${family.id} rewritten=$changed")
                     if (changed > 0) environment.reportRuntimeEvidence(ID, FeatureRuntimeStage.APPLIED, changed)
                 }.onFailure {
                     environment.logError("thread_ripper_runtime_${family.id}",
@@ -85,6 +91,7 @@ internal class ThreadRipperFeatureInstaller(
         environment.reportStatus(CHANNEL, status)
         if (hooks == 0) return FeatureInstallResult.Skipped("missing-thread-ripper-points")
         environment.reportRuntimeEvidence(ID, FeatureRuntimeStage.ADAPTED)
+        stats?.invoke("[BTR] installed $status hooks=$hooks multithread=$multithread mode=${settings.mode.key}")
         environment.logInfo("thread_ripper_installed",
             "[BIL] 线程撕裂者已安装($status, hooks=$hooks, multithread=$multithread)")
         return FeatureInstallResult.Installed(hooks, complete = hooks == expected)

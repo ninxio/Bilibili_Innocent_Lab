@@ -3443,7 +3443,10 @@ class HookEntry : XposedModule() {
                                 ThreadRipperConfig.DEFAULT_CONCURRENCY
                             ),
                             autoConcurrency = prefs.getBoolean(FeaturePreferences.THREAD_RIPPER_AUTO_CONCURRENCY, false)
-                        )
+                        ),
+                        stats = if (prefs.getBoolean(PREF_LOG_ENABLED, true) &&
+                            prefs.getString(PREF_LOG_LEVEL, LOG_LEVEL_COMPLETE) == LOG_LEVEL_COMPLETE
+                        ) { message -> android.util.Log.i("BilibiliInnocentLab", message) } else null
                     )
                 )
             )

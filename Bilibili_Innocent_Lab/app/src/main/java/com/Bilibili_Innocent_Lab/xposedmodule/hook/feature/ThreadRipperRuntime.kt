@@ -15,10 +15,19 @@ internal class ThreadRipperRuntime(
     private val settings: ThreadRipperSettings,
     private val multithread: Boolean,
     private val log: (String) -> Unit = {},
-    private val proxyFactory: (ThreadRipperDownloader) -> ThreadRipperProxyServer = { ThreadRipperProxyServer(it, log) },
+    /** 统计日志；null 表示不输出（模块日志关闭或不是完整档）。 */
+    private val stats: ((String) -> Unit)? = null,
+    private val proxyFactory: (ThreadRipperDownloader) -> ThreadRipperProxyServer = { ThreadRipperProxyServer(it, log, stats) },
     private val fetcher: ThreadRipperFetcher = HttpUrlFetcher,
 ) {
     private val proxyLock = Any()
+    private val hostSpeeds = ThreadRipperHostSpeeds()
+
+    init {
+        // 平台 HttpURLConnection 的连接池默认只留 5 条空闲连接；多线程对同一节点时其余连接用完即关，
+        // 每块都要重新 TLS 握手。连接池在首次使用时读取这个属性，所以安装期就设好；宿主已设置过则不动。
+        runCatching { if (System.getProperty("http.maxConnections") == null) System.setProperty("http.maxConnections", "32") }
+    }
 
     @Volatile
     private var proxy: ThreadRipperProxyServer? = null
@@ -41,11 +50,21 @@ internal class ThreadRipperRuntime(
 
     /** 一次播放响应用一个改写器：其中所有流共用一份封禁表。 */
     fun rewriterForReply(): ThreadRipperPlayUrlAccess.Rewriter {
-        val bans = ThreadRipperBanList(onBan = { host, strikes, kind -> log("停用${if (kind == "node") "节点" else "地址"} $host（$strikes 次无响应）") })
-        return ThreadRipperPlayUrlAccess.Rewriter { primary, backups, audio -> rewrite(primary, backups, audio, bans) }
+        val bans = ThreadRipperBanList(onBan = { host, strikes, kind ->
+            val message = "停用${if (kind == "node") "节点" else "地址"} $host（$strikes 次无响应）"
+            log(message)
+            stats?.invoke("[BTR] $message")
+        })
+        return ThreadRipperPlayUrlAccess.Rewriter { primary, backups, audio, size ->
+            rewrite(primary, backups, audio, bans, size).also { result ->
+                stats?.invoke("[BTR] rewrite ${if (audio) "audio" else "video"} from=${ThreadRipperCdnPolicy.hostOf(primary).substringBefore('.')} " +
+                    "to=${result?.first?.let { if (it.startsWith(LOCAL_PREFIX)) "proxy" else ThreadRipperCdnPolicy.hostOf(it).substringBefore('.') } ?: "unchanged"} " +
+                    "mode=${settings.mode.key} threads=${if (settings.autoConcurrency) "auto" else settings.concurrency}")
+            }
+        }
     }
 
-    fun rewrite(primary: String, backups: List<String>, audio: Boolean, bans: ThreadRipperBanList): Pair<String, List<String>>? {
+    fun rewrite(primary: String, backups: List<String>, audio: Boolean, bans: ThreadRipperBanList, size: Long = 0): Pair<String, List<String>>? {
         if (primary.startsWith(LOCAL_PREFIX)) return null
         val originals = (listOf(primary) + backups).filter(ThreadRipperCdnPolicy::isBilibiliMediaUrl)
         if (originals.isEmpty()) return null
@@ -54,7 +73,7 @@ internal class ThreadRipperRuntime(
         val server = proxyOrNull()
         if (server != null) {
             val local = runCatching {
-                server.register(ThreadRipperStreamSource(primary, backups, audio, bans) { settings })
+                server.register(ThreadRipperStreamSource(primary, backups, audio, bans, hostSpeeds, size) { settings })
             }.getOrNull()
             if (local != null) return local to (listOf(candidates.first()) + originals).distinct().take(MAX_BACKUPS)
         }

@@ -4,18 +4,20 @@ package threadripperstub
  * 形状对齐 protobuf-lite 生成代码的最小播放响应：静态 `newBuilder(source)`、builder 的 `build()`、
  * 消息自身的私有 setter 与 `getDefaultInstance()`。包名故意不同于宿主，验证访问层只靠返回类型推导。
  */
-class DashVideo(private val baseUrl: String = "", private val backupUrl: List<String> = emptyList(), val extra: String = "keep") {
+class DashVideo(private val baseUrl: String = "", private val backupUrl: List<String> = emptyList(), val extra: String = "keep", private val size: Long = 0) {
     fun getBaseUrl() = baseUrl
+    fun getSize() = size
     fun getBackupUrlList() = backupUrl
 
     class Builder(source: DashVideo) {
         private var base = source.baseUrl
         private val backups = source.backupUrl.toMutableList()
         private val extra = source.extra
+        private val size = source.size
         fun setBaseUrl(value: String) = apply { base = value }
         fun clearBackupUrl() = apply { backups.clear() }
         fun addAllBackupUrl(values: Iterable<String>) = apply { backups.addAll(values) }
-        fun build() = DashVideo(base, backups.toList(), extra)
+        fun build() = DashVideo(base, backups.toList(), extra, size)
     }
 
     companion object {

@@ -46,7 +46,7 @@ internal object ThreadRipperCdnPolicy {
 
     private val MEDIA_SUFFIX = Regex("""\.(?:m4s|mp4|flv)$""", RegexOption.IGNORE_CASE)
     private val MEDIA_HOST = Regex(
-        """(?:^|\.)(?:bilivideo\.(?:com|cn|net)|akamaized\.net|szbdyd\.com|hdslb\.com|xycdn\.com|mountaintoys\.cn|nexusedgeio\.com|ahdohpiechei\.com)$""",
+        """(?:^|\.)(?:bilivideo\.(?:com|cn|net)|akamaized\.net|szbdyd\.com|hdslb\.com|xycdn\.com|mountaintoys\.cn|nexusedgeio\.com|ahdohpiechei\.com|yirujs\.com)$""",
         RegexOption.IGNORE_CASE,
     )
     private val HOST_SYNTAX = Regex("""^[a-z\d](?:[a-z\d-]*[a-z\d])?(?:\.[a-z\d](?:[a-z\d-]*[a-z\d])?)+$""")
@@ -129,6 +129,16 @@ internal object ThreadRipperCdnPolicy {
         values.map(::normalizeCdnHost).filter { it.isNotEmpty() }.distinct().take(MAX_CUSTOM_HOSTS)
 
     fun hostOf(value: String?): String = parse(value)?.host?.lowercase().orEmpty()
+
+    /**
+     * 节点回 30x 时的跳转目标（GSLB 把请求转给具体边缘节点）。只接受 B 站视频服务器，
+     * 签名地址绝不能被重定向带到别处；不合格时返回 null，由调用方按失败处理。
+     */
+    fun redirectTarget(current: String, location: String?): String? {
+        val text = location?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        val resolved = runCatching { URI(current).resolve(text).toString() }.getOrNull() ?: return null
+        return resolved.takeIf(::isBilibiliMediaUrl)
+    }
 
     /** 去掉节点后的签名地址：同一个地址可以向任意节点请求。 */
     fun addressOf(value: String?): String {
@@ -291,9 +301,11 @@ internal class ThreadRipperCdnResolver(
     private val bans: ThreadRipperBanList? = null,
     private val customHosts: () -> List<String> = { emptyList() },
     private val clock: () -> Long = System::currentTimeMillis,
+    /** 跨文件共享的节点测速：新文件（换清晰度、换分P）还没有自己的测速时先用它排序。 */
+    private val hostSpeeds: ThreadRipperHostSpeeds? = null,
 ) {
     private class Health(val failures: Int, val blockedUntil: Long, val lastSuccessAt: Long)
-    private class Route(val lastSuccessAt: Long, val lastMeasuredAt: Long, val bps: Double)
+    internal class Route(val lastSuccessAt: Long, val lastMeasuredAt: Long, val bps: Double)
 
     data class NodeStatus(val host: String, val state: String, val bps: Double)
 
@@ -306,7 +318,7 @@ internal class ThreadRipperCdnResolver(
     private fun routeOf(url: String): String =
         ThreadRipperCdnPolicy.hostOf(url) + ThreadRipperCdnPolicy.addressOf(url).substringBefore('?')
 
-    private fun measurement(url: String): Route? = routes[routeOf(url)]
+    private fun measurement(url: String): Route? = routes[routeOf(url)] ?: hostSpeeds?.get(ThreadRipperCdnPolicy.hostOf(url))
 
     private fun measuredNow(url: String, now: Long): Boolean {
         val item = measurement(url) ?: return false
@@ -405,7 +417,7 @@ internal class ThreadRipperCdnResolver(
                 old != null && old.bps > 0 -> old.bps * 0.65 + bps * 0.35
                 else -> bps
             },
-        )
+        ).also { hostSpeeds?.put(ThreadRipperCdnPolicy.hostOf(url), it) }
     }
 
     /** 中途被取消的传输：只说明节点有多快，不算证明地址可用，也不清除之前的失败。 */
@@ -417,7 +429,7 @@ internal class ThreadRipperCdnResolver(
             lastSuccessAt = old?.lastSuccessAt ?: 0,
             lastMeasuredAt = clock(),
             bps = if (old != null && old.bps > 0) old.bps * 0.65 + bps * 0.35 else bps,
-        )
+        ).also { hostSpeeds?.put(ThreadRipperCdnPolicy.hostOf(url), it) }
     }
 
     @Synchronized
@@ -454,5 +466,18 @@ internal class ThreadRipperCdnResolver(
 
     companion object {
         const val MEASUREMENT_TTL_MS = 90_000L
+    }
+}
+
+/** 进程内共享的节点测速（按主机名），只作为还没有本文件测速时的先验。 */
+internal class ThreadRipperHostSpeeds {
+    private val speeds = HashMap<String, ThreadRipperCdnResolver.Route>()
+
+    @Synchronized
+    fun get(host: String): ThreadRipperCdnResolver.Route? = speeds[host]
+
+    @Synchronized
+    fun put(host: String, route: ThreadRipperCdnResolver.Route) {
+        if (host.isNotEmpty()) speeds[host] = route
     }
 }

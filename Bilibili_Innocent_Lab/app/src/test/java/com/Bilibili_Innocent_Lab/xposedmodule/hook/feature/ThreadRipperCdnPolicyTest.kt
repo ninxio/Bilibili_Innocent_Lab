@@ -44,6 +44,18 @@ class ThreadRipperCdnPolicyTest {
         assertFalse(ThreadRipperCdnPolicy.isBilibiliMediaUrl("ftp://upos-sz-mirrorali.bilivideo.com/a/b.m4s"))
     }
 
+    @Test fun `CDN redirects are followed only to Bilibili media servers`() {
+        val from = mediaUrl("upos-sz-mirrorhw.bilivideo.com")
+        assertEquals("https://cn-gddg-ct-01-01.bilivideo.com/upgcxcode/00/00/1/1-1-30080.m4s?deadline=1&os=x&gslb=1",
+            ThreadRipperCdnPolicy.redirectTarget(from, "https://cn-gddg-ct-01-01.bilivideo.com/upgcxcode/00/00/1/1-1-30080.m4s?deadline=1&os=x&gslb=1"))
+        assertEquals("https://upos-sz-mirrorhw.bilivideo.com/upgcxcode/00/00/1/1-1-30080.m4s?e=2",
+            ThreadRipperCdnPolicy.redirectTarget(from, "/upgcxcode/00/00/1/1-1-30080.m4s?e=2"))
+        assertNull("a signed address must never be redirected elsewhere",
+            ThreadRipperCdnPolicy.redirectTarget(from, "https://evil.example.com/upgcxcode/00/00/1/1-1-30080.m4s?deadline=1"))
+        assertNull(ThreadRipperCdnPolicy.redirectTarget(from, "https://cn-gddg-ct-01-01.bilivideo.com/login"))
+        assertNull(ThreadRipperCdnPolicy.redirectTarget(from, null))
+    }
+
     @Test fun `a node is banned after two failures that delivered 0 bytes, and only for the current video`() {
         val banned = ArrayList<String>()
         val bans = ThreadRipperBanList(onBan = { host, _, _ -> banned += host })

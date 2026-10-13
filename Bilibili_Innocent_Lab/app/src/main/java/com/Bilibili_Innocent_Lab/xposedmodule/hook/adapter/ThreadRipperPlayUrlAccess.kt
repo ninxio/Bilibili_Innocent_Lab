@@ -32,7 +32,8 @@ internal class ThreadRipperPlayUrlAccess private constructor(
 ) {
     /** 地址改写函数：返回 null 表示这一路不改。 */
     fun interface Rewriter {
-        fun rewrite(primary: String, backups: List<String>, audio: Boolean): Pair<String, List<String>>?
+        /** @param size 响应里下发的文件字节数；没有该字段或为 0 时为 0 */
+        fun rewrite(primary: String, backups: List<String>, audio: Boolean, size: Long): Pair<String, List<String>>?
     }
 
     /** `getXxx(int)` / `getXxxCount()` 与 builder 的 `setXxx(int, T)`。 */
@@ -52,13 +53,15 @@ internal class ThreadRipperPlayUrlAccess private constructor(
         val setBaseUrl: Method,
         val clearBackupUrl: Method,
         val addAllBackupUrl: Method,
+        val size: Method?,
     ) {
         /** @return 改写后的新消息；无变化时为 null */
         fun rewrite(message: Any, audio: Boolean, rewriter: Rewriter): Any? {
             val primary = baseUrl.invoke(message) as? String ?: return null
             if (primary.isEmpty()) return null
             val backups = (backupUrls.invoke(message) as? List<*>).orEmpty().filterIsInstance<String>()
-            val (nextPrimary, nextBackups) = rewriter.rewrite(primary, backups, audio) ?: return null
+            val bytes = (size?.invoke(message) as? Number)?.toLong()?.takeIf { it > 0 } ?: 0L
+            val (nextPrimary, nextBackups) = rewriter.rewrite(primary, backups, audio, bytes) ?: return null
             if (nextPrimary == primary && nextBackups == backups) return null
             return plan.edit(message) { builder ->
                 setBaseUrl.invoke(builder, nextPrimary)
@@ -77,6 +80,7 @@ internal class ThreadRipperPlayUrlAccess private constructor(
                     plan.method("setBaseUrl", classOf<String>()) ?: return null,
                     plan.method("clearBackupUrl") ?: return null,
                     plan.method("addAllBackupUrl", Iterable::class.java) ?: return null,
+                    method(owner, "getSize")?.takeIf { it.returnType == classOf<Long>() || it.returnType == classOf<Int>() },
                 )
             }
         }

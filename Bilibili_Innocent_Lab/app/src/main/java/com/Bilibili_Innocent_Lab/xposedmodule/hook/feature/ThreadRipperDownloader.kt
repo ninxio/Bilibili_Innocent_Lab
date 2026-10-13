@@ -132,10 +132,23 @@ internal interface ThreadRipperFetcher {
         val status: Int
         val contentRange: String?
         val body: InputStream
+
+        /** 响应体已完整读完：只关闭流，让连接回到 keep-alive 池。[close] 则直接断开。 */
+        fun release() = close()
     }
 }
 
 internal object HttpUrlFetcher : ThreadRipperFetcher {
+    private val REDIRECT_STATUSES = setOf(301, 302, 303, 307, 308)
+    private const val MAX_REDIRECTS = 3
+    private const val MAX_STALE_RETRIES = 2
+
+    private fun isStaleConnection(error: IOException): Boolean {
+        val message = error.message.orEmpty()
+        return message.contains("unexpected end of stream") || message.contains("Connection reset") ||
+            error is java.io.EOFException
+    }
+
     override fun newCall(url: String, start: Long, end: Long, headers: Map<String, String>, settings: ThreadRipperSettings) =
         object : ThreadRipperFetcher.Call {
             @Volatile
@@ -145,26 +158,60 @@ internal object HttpUrlFetcher : ThreadRipperFetcher {
             private var cancelled = false
 
             override fun execute(): ThreadRipperFetcher.Response {
-                if (cancelled) throw ThreadRipperCanceled("已取消")
-                val opened = URL(url).openConnection() as HttpURLConnection
-                connection = opened
-                if (cancelled) {
-                    opened.disconnect()
-                    throw ThreadRipperCanceled("已取消")
-                }
-                opened.instanceFollowRedirects = false
-                opened.useCaches = false
-                opened.connectTimeout = settings.firstByteTimeoutMs.toInt()
-                opened.readTimeout = settings.stallTimeoutMs.toInt()
-                headers.forEach { (name, value) -> opened.setRequestProperty(name, value) }
-                opened.setRequestProperty("Range", "bytes=$start-$end")
-                opened.setRequestProperty("Accept-Encoding", "identity")
-                val status = opened.responseCode
-                return object : ThreadRipperFetcher.Response {
-                    override val status = status
-                    override val contentRange: String? = opened.getHeaderField("Content-Range")
-                    override val body: InputStream by lazy { if (status in 200..299) opened.inputStream else opened.errorStream ?: java.io.ByteArrayInputStream(ByteArray(0)) }
-                    override fun close() = opened.disconnect()
+                // 部分节点（如 mirrorhw、mirror08c）先回 302 把请求转给边缘节点；浏览器的 fetch 会自动跟随，
+                // 这里手动跟随，每一跳都校验目标仍是 B 站视频服务器，并保留 Range 头。
+                var current = url
+                var hops = 0
+                var staleRetries = 0
+                while (true) {
+                    if (cancelled) throw ThreadRipperCanceled("已取消")
+                    val opened = URL(current).openConnection() as HttpURLConnection
+                    connection = opened
+                    if (cancelled) {
+                        opened.disconnect()
+                        throw ThreadRipperCanceled("已取消")
+                    }
+                    opened.instanceFollowRedirects = false
+                    opened.useCaches = false
+                    opened.connectTimeout = settings.firstByteTimeoutMs.toInt()
+                    opened.readTimeout = settings.stallTimeoutMs.toInt()
+                    headers.forEach { (name, value) -> opened.setRequestProperty(name, value) }
+                    opened.setRequestProperty("Range", "bytes=$start-$end")
+                    opened.setRequestProperty("Accept-Encoding", "identity")
+                    val status = try {
+                        opened.responseCode
+                    } catch (error: IOException) {
+                        // 连接池里的空闲连接可能已被服务端关掉（keep-alive 超时），读响应头时才发现；
+                        // 这不是节点的错，换一条新连接重试，不计入失败。
+                        opened.disconnect()
+                        if (cancelled || staleRetries >= MAX_STALE_RETRIES || !isStaleConnection(error)) throw error
+                        staleRetries += 1
+                        continue
+                    }
+                    if (status in REDIRECT_STATUSES && hops < MAX_REDIRECTS) {
+                        val location = opened.getHeaderField("Location")
+                        val next = ThreadRipperCdnPolicy.redirectTarget(current, location)
+                        opened.disconnect()
+                        if (next == null) {
+                            // 只记目标主机名，便于判断该节点是不是在把请求转给我们不认识的服务器。
+                            val target = runCatching { java.net.URI(current).resolve(location?.trim().orEmpty()) }.getOrNull()
+                            throw ThreadRipperTransferError("redirect→${target?.host ?: "?"}${target?.port?.takeIf { it > 0 }?.let { ":$it" } ?: ""}", status)
+                        }
+                        current = next
+                        hops += 1
+                        continue
+                    }
+                    return object : ThreadRipperFetcher.Response {
+                        override val status = status
+                        override val contentRange: String? = opened.getHeaderField("Content-Range")
+                        override val body: InputStream by lazy { if (status in 200..299) opened.inputStream else opened.errorStream ?: java.io.ByteArrayInputStream(ByteArray(0)) }
+                        override fun close() = opened.disconnect()
+
+                        // disconnect() 会关掉 socket，连接池里永远没有可复用的连接；读完后只关流。
+                        override fun release() {
+                            runCatching { body.close() }.onFailure { opened.disconnect() }
+                        }
+                    }
                 }
             }
 
@@ -496,6 +543,32 @@ internal class ThreadRipperDownloader(
     /** 已完整到达的字节数，供设置页/诊断显示。 */
     val deliveredBytes = AtomicLong()
 
+    /** 累计计数，供统计日志按差值汇总；只有数字，不含地址。 */
+    class Counters {
+        val attempts = AtomicLong()
+        val hedges = AtomicLong()
+        val failures = AtomicLong()
+        val firstByteMsTotal = AtomicLong()
+        val firstByteSamples = AtomicLong()
+
+        fun snapshot() = longArrayOf(attempts.get(), hedges.get(), failures.get(), firstByteMsTotal.get(), firstByteSamples.get())
+
+        /** 失败原因按"节点|原因"计数；[drainFailures] 取走并清零。 */
+        private val reasons = java.util.concurrent.ConcurrentHashMap<String, AtomicInteger>()
+
+        fun recordFailure(host: String, reason: String) {
+            reasons.getOrPut("$host|$reason") { AtomicInteger() }.incrementAndGet()
+        }
+
+        fun drainFailures(): Map<String, Int> {
+            val out = HashMap<String, Int>()
+            for (key in reasons.keys.toList()) reasons.remove(key)?.get()?.takeIf { it > 0 }?.let { out[key] = it }
+            return out
+        }
+    }
+
+    val counters = Counters()
+
     init {
         slots.onChange = { active, limit, queued -> if (effective().autoConcurrency) autoConcurrency.demand(active, limit, queued) }
         autoConcurrency.subscribe { applySettings() }
@@ -577,10 +650,12 @@ internal class ThreadRipperDownloader(
         headers: Map<String, String>,
         priority: Int,
         queueClass: Int,
+        onChunk: ((position: Long, bytes: ByteArray) -> Unit)? = null,
         begin: (() -> Pair<ThreadRipperPiece, Recorder>)? = null,
     ): ThreadRipperResult {
         val config = effective()
         val release = slots.acquire(cancel, queueClass, priority)
+        counters.attempts.incrementAndGet()
         var part = piece
         var received = Recorder()
         val local = ThreadRipperCancel(cancel)
@@ -595,7 +670,8 @@ internal class ThreadRipperDownloader(
             val firstByte = timers.schedule({ if (!gotHeaders) local.cancel(ThreadRipperTimeout("CDN 首字节超时")) }, config.firstByteTimeoutMs, TimeUnit.MILLISECONDS)
             val total = timers.schedule({ local.cancel(ThreadRipperTimeout("CDN 子块总耗时超限")) }, config.attemptTimeoutMs, TimeUnit.MILLISECONDS)
             val call = fetcher.newCall(url, part.start, part.end, headers, config)
-            local.onCancel(call::cancel)
+            var completed = false
+            local.onCancel { if (!completed) call.cancel() }
             try {
                 val response = try {
                     call.execute()
@@ -603,7 +679,9 @@ internal class ThreadRipperDownloader(
                     throw local.reason ?: error
                 }
                 gotHeaders = true
-                response.use {
+                counters.firstByteMsTotal.addAndGet(nowMs() - startedAt)
+                counters.firstByteSamples.incrementAndGet()
+                try {
                     val contentRange = ThreadRipperCdnPolicy.parseContentRange(response.contentRange)
                     // 首块探测时还不知道文件总长，请求可能越过文件末尾；服务器按 RFC 把终点截到末尾，
                     // 只要截断处正好是文件末尾就接受，这一块随之变短。
@@ -621,8 +699,11 @@ internal class ThreadRipperDownloader(
                             local.throwIfCancelled()
                             val count = response.body.read(buffer, 0, minOf(buffer.size.toLong(), part.length - read).toInt())
                             if (count < 0) break
+                            val chunk = buffer.copyOf(count)
+                            received.add(chunk)
+                            // Content-Range 已核对过起点，到达的字节位置可信，可以先交给等着的播放器。
+                            onChunk?.invoke(part.start + read, chunk)
                             read += count
-                            received.add(buffer.copyOf(count))
                         }
                     } catch (error: IOException) {
                         throw local.reason ?: ThreadRipperTimeout(if (error is java.net.SocketTimeoutException) "CDN 子块停止传输" else error.message ?: "CDN 读取失败")
@@ -632,7 +713,12 @@ internal class ThreadRipperDownloader(
                     val elapsed = maxOf(1L, nowMs() - startedAt)
                     recordMeter(read, elapsed)
                     resolver.success(url, if (read >= SPEED_SAMPLE_MIN_BYTES) read * 1000.0 / elapsed else 0.0)
-                    return ThreadRipperResult(concat(received.snapshot(), part.length), contentRange.total, url)
+                    val result = ThreadRipperResult(concat(received.snapshot(), part.length), contentRange.total, url)
+                    completed = true
+                    response.release()
+                    return result
+                } finally {
+                    if (!completed) response.close()
                 }
             } finally {
                 firstByte.cancel(false)
@@ -646,6 +732,16 @@ internal class ThreadRipperDownloader(
             }
             val status = (error as? ThreadRipperTransferError)?.status ?: 0
             resolver.failure(url, status, received.bytes, canceled)
+            if (!canceled) {
+                counters.failures.incrementAndGet()
+                val reason = when {
+                    status > 0 && error.message?.startsWith("redirect") == true -> "http$status ${error.message}"
+                    status > 0 -> "http$status"
+                    error is ThreadRipperTimeout -> error.message ?: "timeout"
+                    else -> error.javaClass.simpleName + ":" + (error.message ?: "").take(40)
+                } + if (received.bytes > 0) "+${received.bytes / 1024}K" else ""
+                counters.recordFailure(ThreadRipperCdnPolicy.hostOf(url).substringBefore('.'), reason)
+            }
             if (config.autoConcurrency) {
                 if (status == 412 || status == 429) autoConcurrency.pushback(status)
                 else if (error is ThreadRipperTimeout && received.bytes == 0L) autoConcurrency.slow()
@@ -708,6 +804,13 @@ internal class ThreadRipperDownloader(
         preferred: List<String>,
         startupMode: StartupMode = StartupMode.NONE,
         priority: Int = 0,
+        /**
+         * 是否允许为它发副本。网页端按播放截止时间决定；这里由调用方告诉我们播放器是否正在等这一块。
+         * 不允许时，只有第一份完全停住（3 倍延迟没有新数据）才救援。null = 总是允许。
+         */
+        hedgeWhen: (() -> Boolean)? = null,
+        /** 每段到达的数据（绝对位置），供调用方边下边交付；同一位置可能来自多个副本，内容相同。 */
+        onChunk: ((position: Long, bytes: ByteArray) -> Unit)? = null,
     ): ThreadRipperResult {
         val startedAt = nowMs()
         var lastError: IOException? = null
@@ -730,7 +833,8 @@ internal class ThreadRipperDownloader(
             }
             val candidates = pieceCandidates(piece, resolver, preferred, round)
             val limit = minOf(8, candidates.size)
-            val batchWidth = if (probe) limit else 2
+            // 首块探测原项目一次全上（最多 8 路）；手机上每路都是一次 TLS 握手，3 路已足够选出快节点。
+            val batchWidth = if (probe) minOf(3, limit) else 2
             val tried = HashSet<String>()
             while (tried.size < limit) {
                 cancel.throwIfCancelled()
@@ -757,10 +861,15 @@ internal class ThreadRipperDownloader(
                                     if (firstFailed.get()) break
                                     val first = contexts[0]
                                     // 第一份还在排队时副本也只会排队，等它拿到连接再判断。
-                                    if (probe || (first != null && hedgeDue(first, delay, resolver.speed(url)))) break
+                                    if (probe) break
+                                    if (first != null && hedgeDue(first, delay, resolver.speed(url))) {
+                                        val stuck = nowMs() - first.seenAt >= delay * 3
+                                        if (hedgeWhen?.invoke() != false || stuck) break
+                                    }
                                     Thread.sleep(HEDGE_POLL_MS)
                                 }
                             }
+                            if (pairIndex > 0) counters.hedges.incrementAndGet()
                             val result = attempt(
                                 piece, url, controllers[pairIndex], resolver, headers,
                                 priority + if (pairIndex > 0) 20 else 0,
@@ -769,6 +878,7 @@ internal class ThreadRipperDownloader(
                                     startup -> ThreadRipperSlots.STARTUP
                                     else -> ThreadRipperSlots.ORDINARY
                                 },
+                                onChunk,
                             ) {
                                 base = synchronized(prefixLock) { prefix?.takeIf { it.bytes >= RESUME_MIN_BYTES } }
                                 if (pairIndex > 0) {
